@@ -1,7 +1,7 @@
-python-telegram-bot[job-queue]==20.3
+python-telegram-bot[job-queue]
 requests
 python-dotenv
 feedparser
-httpx==0.24.1
-httpcore==0.17.3
+httpx
+httpcore
 apscheduler
