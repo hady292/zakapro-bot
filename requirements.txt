@@ -4,3 +4,4 @@ python-dotenv
 feedparser
 httpx==0.24.1
 httpcore==0.17.3
+apscheduler
