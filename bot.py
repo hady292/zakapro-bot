@@ -4,6 +4,7 @@ import random
 import logging
 import requests
 from pathlib import Path
+
 from telegram import Update
 from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
 
@@ -17,7 +18,6 @@ BLOGGER_ACCESS_TOKEN = os.getenv("BLOGGER_ACCESS_TOKEN")
 
 POST_INTERVAL_SECONDS = 10800  # كل 3 ساعات
 POSTED_FILE = Path("posted_titles.json")
-
 
 TOPICS = [
     "أفضل أدوات الذكاء الاصطناعي للمبتدئين",
@@ -61,8 +61,8 @@ def make_article():
 
     intro = random.choice([
         "أصبح الذكاء الاصطناعي من أهم الأدوات التي تغيّر طريقة العمل والتعلم والربح من الإنترنت.",
-        "في السنوات الأخيرة، أصبحت أدوات الذكاء الاصطناعي جزءًا أساسيًا من حياة صناع المحتوى ورواد الأعمال.",
-        "لم يعد الذكاء الاصطناعي مجرد تقنية مستقبلية، بل أصبح وسيلة عملية تساعدك على إنجاز المهام بسرعة وجودة أعلى."
+        "أدوات الذكاء الاصطناعي أصبحت فرصة حقيقية لكل شخص يريد تطوير مهاراته وزيادة إنتاجيته.",
+        "لم يعد الذكاء الاصطناعي تقنية بعيدة، بل أصبح وسيلة عملية تساعدك على إنجاز المهام بسرعة وجودة أعلى."
     ])
 
     content = f"""
@@ -107,20 +107,35 @@ def make_article():
 
 
 def publish_to_blogger(title, content):
-    url = f"https://www.googleapis.com/blogger/v3/blogs/{BLOG_ID}/posts/"
-    headers = {
-        "Authorization": f"Bearer {BLOGGER_ACCESS_TOKEN}",
-        "Content-Type": "application/json",
-    }
-    data = {"kind": "blogger#post", "title": title, "content": content}
-    response = requests.post(url, headers=headers, json=data, timeout=30)
-    return response.status_code, response.text
+    try:
+        url = f"https://www.googleapis.com/blogger/v3/blogs/{BLOG_ID}/posts/"
+        headers = {
+            "Authorization": f"Bearer {BLOGGER_ACCESS_TOKEN}",
+            "Content-Type": "application/json",
+        }
+        data = {
+            "kind": "blogger#post",
+            "title": title,
+            "content": content,
+        }
+
+        response = requests.post(url, headers=headers, json=data, timeout=10)
+        return response.status_code, response.text
+
+    except Exception as e:
+        logger.exception("Blogger request failed")
+        return 500, str(e)
 
 
 async def publish_article(context: ContextTypes.DEFAULT_TYPE, reply_func=None):
-    if not BLOG_ID or not BLOGGER_ACCESS_TOKEN:
+    if not BLOG_ID:
         if reply_func:
-            await reply_func("❌ BLOG_ID أو BLOGGER_ACCESS_TOKEN غير موجود")
+            await reply_func("❌ BLOG_ID غير موجود في Render")
+        return
+
+    if not BLOGGER_ACCESS_TOKEN:
+        if reply_func:
+            await reply_func("❌ BLOGGER_ACCESS_TOKEN غير موجود في Render")
         return
 
     title, content = make_article()
@@ -134,10 +149,12 @@ async def publish_article(context: ContextTypes.DEFAULT_TYPE, reply_func=None):
             )
         if reply_func:
             await reply_func("✅ تم النشر في Blogger والقناة")
+        logger.info("Published successfully: %s", title)
     else:
+        error_msg = f"❌ فشل النشر\nStatus: {status_code}\n{result[:900]}"
         if reply_func:
-            await reply_func(f"❌ فشل النشر\nStatus: {status_code}\n{result[:900]}")
-        logger.error("Publish failed: %s %s", status_code, result[:900])
+            await reply_func(error_msg)
+        logger.error(error_msg)
 
 
 async def auto_post(context: ContextTypes.DEFAULT_TYPE):
@@ -157,6 +174,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def status(update: Update, context: ContextTypes.DEFAULT_TYPE):
     posted_count = len(load_posted_titles())
+
     await update.message.reply_text(
         "✅ البوت يعمل\n"
         f"📢 CHANNEL_ID: {CHANNEL_ID or 'غير موجود ❌'}\n"
@@ -189,12 +207,17 @@ def main():
     app.add_handler(CommandHandler("run", run))
 
     if app.job_queue is None:
-        raise RuntimeError("JobQueue غير مثبت. عدّل requirements.txt")
+        raise RuntimeError("JobQueue غير مثبت. تأكد من requirements.txt")
 
-    app.job_queue.run_repeating(auto_post, interval=POST_INTERVAL_SECONDS, first=60)
+    app.job_queue.run_repeating(
+        auto_post,
+        interval=POST_INTERVAL_SECONDS,
+        first=60
+    )
 
     logger.info("✅ ZakaPro AI Bot is running...")
     logger.info("⏱ Auto post every 3 hours enabled")
+
     app.run_polling()
 
 
