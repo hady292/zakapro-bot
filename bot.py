@@ -4,23 +4,26 @@ from telegram import Update
 from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
 
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
-CHANNEL_ID = os.getenv("CHANNEL_ID", "@zakapro_channel")
-BLOG_ID = os.getenv("BLOG_ID", "3446663962857726908")
+CHANNEL_ID = os.getenv("CHANNEL_ID")
+BLOG_ID = os.getenv("BLOG_ID")
 BLOGGER_ACCESS_TOKEN = os.getenv("BLOGGER_ACCESS_TOKEN")
+
 
 def publish_to_blogger(title, content):
     url = f"https://www.googleapis.com/blogger/v3/blogs/{BLOG_ID}/posts/"
     headers = {
         "Authorization": f"Bearer {BLOGGER_ACCESS_TOKEN}",
-        "Content-Type": "application/json"
+        "Content-Type": "application/json",
     }
     data = {
         "kind": "blogger#post",
         "title": title,
-        "content": content
+        "content": content,
     }
-    r = requests.post(url, headers=headers, json=data, timeout=30)
-    return r.status_code, r.text
+
+    response = requests.post(url, headers=headers, json=data, timeout=30)
+    return response.status_code, response.text
+
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
@@ -31,47 +34,51 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "/run - تشغيل يدوي"
     )
 
+
 async def status(update: Update, context: ContextTypes.DEFAULT_TYPE):
     msg = "✅ البوت يعمل\n"
-    msg += f"📢 القناة: {CHANNEL_ID}\n"
-    msg += f"📝 BLOG_ID: {BLOG_ID}\n"
-
-    if BLOGGER_ACCESS_TOKEN:
-        msg += "🔑 Blogger Token: موجود ✅"
-    else:
-        msg += "🔑 Blogger Token: غير موجود ❌"
-
+    msg += f"📢 CHANNEL_ID: {CHANNEL_ID or 'غير موجود ❌'}\n"
+    msg += f"📝 BLOG_ID: {BLOG_ID or 'غير موجود ❌'}\n"
+    msg += f"🔑 Telegram Token: {'موجود ✅' if TELEGRAM_TOKEN else 'غير موجود ❌'}\n"
+    msg += f"🔑 Blogger Token: {'موجود ✅' if BLOGGER_ACCESS_TOKEN else 'غير موجود ❌'}"
     await update.message.reply_text(msg)
 
-async def generate(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    title = "مقال جديد عن الذكاء الاصطناعي 🚀"
-    content = """
-    <h2>كيف يساعدك الذكاء الاصطناعي؟</h2>
-    <p>الذكاء الاصطناعي أصبح أداة قوية تساعد في كتابة المقالات، تنظيم العمل، إنشاء الأفكار، وتحسين الإنتاجية.</p>
-    <p>هذا المقال تم توليده ونشره تلقائيًا بواسطة بوت ZakaPro AI.</p>
-    """
 
+async def generate(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("⏳ جاري توليد ونشر المقال...")
+
+    if not BLOG_ID:
+        await update.message.reply_text("❌ BLOG_ID غير موجود في Render")
+        return
 
     if not BLOGGER_ACCESS_TOKEN:
         await update.message.reply_text("❌ BLOGGER_ACCESS_TOKEN غير موجود في Render")
         return
 
+    title = "مقال جديد عن الذكاء الاصطناعي 🚀"
+    content = """
+<h2>كيف يساعدك الذكاء الاصطناعي؟</h2>
+<p>الذكاء الاصطناعي أصبح أداة قوية تساعد في كتابة المقالات، تنظيم العمل، إنشاء الأفكار، وتحسين الإنتاجية.</p>
+<p>هذا المقال تم توليده ونشره تلقائيًا بواسطة بوت ZakaPro AI.</p>
+"""
+
     status_code, result = publish_to_blogger(title, content)
 
-    if status_code in [200, 201]:
+    if status_code in (200, 201):
         await context.bot.send_message(
             chat_id=CHANNEL_ID,
-            text=f"🚀 تم نشر مقال جديد\n\n{title}"
+            text=f"🚀 تم نشر مقال جديد في Blogger\n\n{title}"
         )
         await update.message.reply_text("✅ تم النشر في Blogger والقناة")
     else:
         await update.message.reply_text(
-            f"❌ فشل النشر في Blogger\n\nStatus: {status_code}\n{result[:700]}"
+            f"❌ فشل النشر في Blogger\n\nStatus: {status_code}\n{result[:900]}"
         )
+
 
 async def run(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await generate(update, context)
+
 
 def main():
     if not TELEGRAM_TOKEN:
@@ -86,6 +93,7 @@ def main():
 
     print("✅ ZakaPro AI Bot is running...")
     app.run_polling()
+
 
 if __name__ == "__main__":
     main()
