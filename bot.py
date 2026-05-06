@@ -11,7 +11,10 @@ from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
+# يدعم الاسمين:
+# TELEGRAM_TOKEN أو BOT_TOKEN
+TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN") or os.getenv("BOT_TOKEN")
+
 CHANNEL_ID = os.getenv("CHANNEL_ID")
 BLOG_ID = os.getenv("BLOG_ID")
 
@@ -40,6 +43,7 @@ def get_access_token():
     """
     يجلب Access Token جديد من Google باستخدام Refresh Token.
     لا تحتاج BLOGGER_ACCESS_TOKEN بعد الآن.
+
     المطلوب في Render Environment:
     CLIENT_ID
     CLIENT_SECRET
@@ -285,7 +289,7 @@ async def run(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 def main():
     if not TELEGRAM_TOKEN:
-        raise ValueError("TELEGRAM_TOKEN غير موجود في Render Environment")
+        raise ValueError("TELEGRAM_TOKEN أو BOT_TOKEN غير موجود في Render Environment")
 
     app = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
 
