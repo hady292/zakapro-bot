@@ -14,7 +14,10 @@ logger = logging.getLogger(__name__)
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 CHANNEL_ID = os.getenv("CHANNEL_ID")
 BLOG_ID = os.getenv("BLOG_ID")
-BLOGGER_ACCESS_TOKEN = os.getenv("BLOGGER_ACCESS_TOKEN")
+
+CLIENT_ID = os.getenv("CLIENT_ID")
+CLIENT_SECRET = os.getenv("CLIENT_SECRET")
+REFRESH_TOKEN = os.getenv("REFRESH_TOKEN")
 
 POST_INTERVAL_SECONDS = 10800  # كل 3 ساعات
 POSTED_FILE = Path("posted_titles.json")
@@ -31,6 +34,49 @@ TOPICS = [
     "مستقبل العمل الحر مع الذكاء الاصطناعي",
     "أخطاء يجب تجنبها عند استخدام أدوات الذكاء الاصطناعي",
 ]
+
+
+def get_access_token():
+    """
+    يجلب Access Token جديد من Google باستخدام Refresh Token.
+    لا تحتاج BLOGGER_ACCESS_TOKEN بعد الآن.
+    المطلوب في Render Environment:
+    CLIENT_ID
+    CLIENT_SECRET
+    REFRESH_TOKEN
+    """
+    if not CLIENT_ID:
+        raise ValueError("CLIENT_ID غير موجود في Render Environment")
+    if not CLIENT_SECRET:
+        raise ValueError("CLIENT_SECRET غير موجود في Render Environment")
+    if not REFRESH_TOKEN:
+        raise ValueError("REFRESH_TOKEN غير موجود في Render Environment")
+
+    url = "https://oauth2.googleapis.com/token"
+
+    data = {
+        "client_id": CLIENT_ID,
+        "client_secret": CLIENT_SECRET,
+        "refresh_token": REFRESH_TOKEN,
+        "grant_type": "refresh_token"
+    }
+
+    response = requests.post(url, data=data, timeout=15)
+
+    if response.status_code != 200:
+        raise RuntimeError(
+            f"فشل جلب Google Access Token\n"
+            f"Status: {response.status_code}\n"
+            f"Response: {response.text[:900]}"
+        )
+
+    token_data = response.json()
+    token = token_data.get("access_token")
+
+    if not token:
+        raise RuntimeError(f"لم يتم العثور على access_token في الرد: {token_data}")
+
+    return token
 
 
 def load_posted_titles():
@@ -108,18 +154,22 @@ def make_article():
 
 def publish_to_blogger(title, content):
     try:
+        access_token = get_access_token()
+
         url = f"https://www.googleapis.com/blogger/v3/blogs/{BLOG_ID}/posts/"
+
         headers = {
-            "Authorization": f"Bearer {BLOGGER_ACCESS_TOKEN}",
+            "Authorization": f"Bearer {access_token}",
             "Content-Type": "application/json",
         }
+
         data = {
             "kind": "blogger#post",
             "title": title,
             "content": content,
         }
 
-        response = requests.post(url, headers=headers, json=data, timeout=10)
+        response = requests.post(url, headers=headers, json=data, timeout=20)
         return response.status_code, response.text
 
     except Exception as e:
@@ -130,28 +180,63 @@ def publish_to_blogger(title, content):
 async def publish_article(context: ContextTypes.DEFAULT_TYPE, reply_func=None):
     if not BLOG_ID:
         if reply_func:
-            await reply_func("❌ BLOG_ID غير موجود في Render")
+            await reply_func("❌ BLOG_ID غير موجود في Render Environment")
         return
 
-    if not BLOGGER_ACCESS_TOKEN:
+    if not CLIENT_ID:
         if reply_func:
-            await reply_func("❌ BLOGGER_ACCESS_TOKEN غير موجود في Render")
+            await reply_func("❌ CLIENT_ID غير موجود في Render Environment")
+        return
+
+    if not CLIENT_SECRET:
+        if reply_func:
+            await reply_func("❌ CLIENT_SECRET غير موجود في Render Environment")
+        return
+
+    if not REFRESH_TOKEN:
+        if reply_func:
+            await reply_func("❌ REFRESH_TOKEN غير موجود في Render Environment")
         return
 
     title, content = make_article()
     status_code, result = publish_to_blogger(title, content)
 
     if status_code in (200, 201):
+        try:
+            result_json = json.loads(result)
+            blogger_url = result_json.get("url", "")
+        except Exception:
+            blogger_url = ""
+
         if CHANNEL_ID:
-            await context.bot.send_message(
-                chat_id=CHANNEL_ID,
-                text=f"🚀 تم نشر مقال جديد في Blogger\n\n📝 {title}"
-            )
+            telegram_text = f"🚀 تم نشر مقال جديد في Blogger\n\n📝 {title}"
+            if blogger_url:
+                telegram_text += f"\n\n🔗 رابط المقال:\n{blogger_url}"
+
+            try:
+                await context.bot.send_message(
+                    chat_id=CHANNEL_ID,
+                    text=telegram_text
+                )
+            except Exception as e:
+                logger.exception("Telegram channel send failed")
+                if reply_func:
+                    await reply_func(
+                        "✅ تم النشر في Blogger\n"
+                        f"⚠️ لكن فشل الإرسال للقناة:\n{str(e)[:700]}"
+                    )
+                    return
+
         if reply_func:
-            await reply_func("✅ تم النشر في Blogger والقناة")
+            msg = "✅ تم النشر في Blogger والقناة"
+            if blogger_url:
+                msg += f"\n\n🔗 رابط المقال:\n{blogger_url}"
+            await reply_func(msg)
+
         logger.info("Published successfully: %s", title)
+
     else:
-        error_msg = f"❌ فشل النشر\nStatus: {status_code}\n{result[:900]}"
+        error_msg = f"❌ فشل النشر في Blogger\nStatus: {status_code}\n{result[:900]}"
         if reply_func:
             await reply_func(error_msg)
         logger.error(error_msg)
@@ -168,7 +253,8 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "/generate - نشر مقال الآن\n"
         "/run - تشغيل يدوي\n\n"
         "⏱ النشر التلقائي: كل 3 ساعات\n"
-        "🛡 منع التكرار: مفعل"
+        "🛡 منع التكرار: مفعل\n"
+        "🔑 Blogger يعمل الآن بنظام Refresh Token"
     )
 
 
@@ -176,18 +262,20 @@ async def status(update: Update, context: ContextTypes.DEFAULT_TYPE):
     posted_count = len(load_posted_titles())
 
     await update.message.reply_text(
-        "✅ البوت يعمل\n"
+        "✅ حالة البوت:\n\n"
         f"📢 CHANNEL_ID: {CHANNEL_ID or 'غير موجود ❌'}\n"
         f"📝 BLOG_ID: {BLOG_ID or 'غير موجود ❌'}\n"
         f"🔑 Telegram Token: {'موجود ✅' if TELEGRAM_TOKEN else 'غير موجود ❌'}\n"
-        f"🔑 Blogger Token: {'موجود ✅' if BLOGGER_ACCESS_TOKEN else 'غير موجود ❌'}\n"
+        f"🔑 CLIENT_ID: {'موجود ✅' if CLIENT_ID else 'غير موجود ❌'}\n"
+        f"🔑 CLIENT_SECRET: {'موجود ✅' if CLIENT_SECRET else 'غير موجود ❌'}\n"
+        f"🔑 REFRESH_TOKEN: {'موجود ✅' if REFRESH_TOKEN else 'غير موجود ❌'}\n"
         f"🗂 عدد العناوين المحفوظة: {posted_count}\n"
         "⏱ النشر التلقائي: كل 3 ساعات"
     )
 
 
 async def generate(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("⏳ جاري توليد ونشر مقال عالي الجودة...")
+    await update.message.reply_text("⏳ جاري توليد ونشر مقال...")
     await publish_article(context, reply_func=update.message.reply_text)
 
 
@@ -207,7 +295,10 @@ def main():
     app.add_handler(CommandHandler("run", run))
 
     if app.job_queue is None:
-        raise RuntimeError("JobQueue غير مثبت. تأكد من requirements.txt")
+        raise RuntimeError(
+            "JobQueue غير مثبت. عدّل requirements.txt واستخدم:\n"
+            "python-telegram-bot[job-queue]==20.7"
+        )
 
     app.job_queue.run_repeating(
         auto_post,
@@ -217,6 +308,7 @@ def main():
 
     logger.info("✅ ZakaPro AI Bot is running...")
     logger.info("⏱ Auto post every 3 hours enabled")
+    logger.info("🔑 Blogger Auth uses Refresh Token")
 
     app.run_polling()
 
